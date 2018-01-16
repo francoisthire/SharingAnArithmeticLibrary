@@ -1,1 +1,5 @@
-Add a STTforall library
+*~
+.depend
+*.vo
+*.glob
+*.aux
