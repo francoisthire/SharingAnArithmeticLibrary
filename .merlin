@@ -1,0 +1,7 @@
+S src
+S src/CiC
+
+B _build/src
+B _build/src/CiC
+
+PKG str dedukti.kernel dedukti.parser
