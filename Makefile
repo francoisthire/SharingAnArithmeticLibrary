@@ -12,6 +12,8 @@ OUTPUTFILECOQ = $(OUTPUTFILE:%=coq/%.v)
 
 OUTPUTFILEMATITA = $(OUTPUTFILE:%=matita/%.ma)
 
+COQ = coqc
+
 all: main coq
 
 default: main
@@ -25,7 +27,13 @@ coq: main
 matita: main
 	./main.native -to matita $(FILES) -o $(OUTPUTFILEMATITA)
 
-.PHONY: main coq
+leibniz-coq:
+	$(COQ) coq/leibniz.v
+
+test-coq: leibniz-coq coq
+	$(COQ) -Q coq '' $(OUTPUTFILECOQ)
+
+.PHONY: main coq test-coq leibniz-coq
 
 clean:
 	ocamlbuild -clean
