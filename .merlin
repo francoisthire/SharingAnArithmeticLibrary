@@ -1,7 +1,9 @@
 S src
 S src/CiC
+S src/opentheory
 
 B _build/src
 B _build/src/CiC
+B _build/src/opentheory
 
 PKG str dedukti.kernel dedukti.parser

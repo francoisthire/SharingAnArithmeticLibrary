@@ -19,4 +19,4 @@ struct
   let flush = flush `Matita
 end
 
-module OpenTheory = OpenTheory
+module OpenTheory = Hol

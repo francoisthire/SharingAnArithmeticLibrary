@@ -12,6 +12,8 @@ OUTPUTFILECOQ = $(OUTPUTFILE:%=coq/%.v)
 
 OUTPUTFILEMATITA = $(OUTPUTFILE:%=matita/%.ma)
 
+OUTPUTFILEOT = $(OUTPUTFILE:%=opentheory/%.art)
+
 COQ = coqc
 
 MATITA = matita
@@ -41,7 +43,10 @@ leibniz-matita:
 test-matita: leibniz-matita matita
 	$(MATITA) matita/final.ma
 
-.PHONY: main coq test-coq leibniz-coq
+opentheory: main
+	./main.native -I sttforall -to opentheory $(FILES) -o $(OUTPUTFILEOT)
+
+.PHONY: main coq test-coq leibniz-coq matita test-matita leibniz-matita opentheory
 
 clean:
 	ocamlbuild -clean

@@ -22,7 +22,8 @@ let set_output_file s =
 let entries = ref []
 
 module T = struct
-  let mk_prelude _ i = ()
+  let mk_prelude _ i =
+    Env.init i
 
   let mk_declaration _ i st ty =
     match st with
@@ -71,7 +72,8 @@ let add_file f = files := f :: !files
 let options =
   [ "-stdin", Arg.Set from_stdin, " read from stdin";
     "-to", Arg.String set_export, "Set the exporting system. Currently, only Matita, Coq and OpenTheory are supported";
-    "-o", Arg.String set_output_file, "Set outputfile."
+    "-o", Arg.String set_output_file, "Set outputfile.";
+    ("-I"      , Arg.String Basic.add_path         , "Add a directory to load path");
   ]
 
 let  _ =
