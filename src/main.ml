@@ -14,6 +14,11 @@ let set_export s =
   else
     failwith (Format.sprintf "%s is not among the supported systems@." s)
 
+let output_file = ref ""
+
+let set_output_file s =
+  output_file := s
+
 let entries = ref []
 
 module T = struct
@@ -38,7 +43,7 @@ module T = struct
 
   let mk_command _ cmd = failwith "Commands are not supported"
 
-  let mk_ending _ = failwith "todo"
+  let mk_ending _ = ()
 end
 
 module P = Parser.Make(T)
@@ -65,11 +70,18 @@ let add_file f = files := f :: !files
 
 let options =
   [ "-stdin", Arg.Set from_stdin, " read from stdin";
-    "-to", Arg.String set_export, "Set the exporting system. Currently, only Matita, Coq and OpenTheory are supported"
+    "-to", Arg.String set_export, "Set the exporting system. Currently, only Matita, Coq and OpenTheory are supported";
+    "-o", Arg.String set_output_file, "Set outputfile."
   ]
 
 let  _ =
   Arg.parse options add_file "usage: dkindent file [file...]";
   if !from_stdin
     then process_chan stdin
-    else List.iter process_file (List.rev !files)
+    else List.iter process_file (List.rev !files);
+  let module E  = ((val !system):Export.E) in
+  List.iter (E.export_entry (Basic.mk_mident "final")) !entries;
+  if !output_file = "" then
+    E.flush Format.std_formatter
+  else
+    E.flush (Format.formatter_of_out_channel (open_out !output_file))
