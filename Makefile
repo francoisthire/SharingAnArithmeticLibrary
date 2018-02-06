@@ -14,6 +14,8 @@ OUTPUTFILEMATITA = $(OUTPUTFILE:%=matita/%.ma)
 
 COQ = coqc
 
+MATITA = matita
+
 all: main coq
 
 default: main
@@ -24,14 +26,20 @@ main:
 coq: main
 	./main.native -to coq $(FILES) -o $(OUTPUTFILECOQ)
 
-matita: main
-	./main.native -to matita $(FILES) -o $(OUTPUTFILEMATITA)
-
 leibniz-coq:
 	$(COQ) coq/leibniz.v
 
 test-coq: leibniz-coq coq
 	$(COQ) -Q coq '' $(OUTPUTFILECOQ)
+
+matita: main
+	./main.native -to matita $(FILES) -o $(OUTPUTFILEMATITA)
+
+leibniz-matita:
+	$(MATITA) matita/leibniz.ma
+
+test-matita: leibniz-matita matita
+	$(MATITA) matita/final.ma
 
 .PHONY: main coq test-coq leibniz-coq
 
