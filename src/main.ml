@@ -88,6 +88,8 @@ let  _ =
   let fmt =
   if !output_file = "" then
     Format.std_formatter else (Format.formatter_of_out_channel (open_out !output_file)) in
+  (*FIXME: Some side behaviour if the name of the module is the same of the last file. Dedukti won't import definitions from that module *)
+  Env.init (mk_mident "final");
   E.init fmt;
   List.iter E.export_entry (List.rev !entries);
   E.flush ()
