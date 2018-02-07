@@ -41,10 +41,15 @@ leibniz-matita:
 	$(MATITA) matita/leibniz.ma
 
 test-matita: leibniz-matita matita
-	$(MATITA) matita/final.ma
+	$(MATITA) $(OUTPUTFILEMATITA)
 
 opentheory: main
 	./main.native -I sttforall -to opentheory $(FILES) -o $(OUTPUTFILEOT)
+
+test-opentheory: opentheory
+	opentheory info $(OUTPUTFILEOT)
+
+test: test-coq test-matita test-opentheory
 
 .PHONY: main coq test-coq leibniz-coq matita test-matita leibniz-matita opentheory
 
