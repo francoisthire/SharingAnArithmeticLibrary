@@ -1,5 +1,6 @@
 open Basic
 
+(* If someone reads this code, please send a mail to francois.thire@lsv.fr before. It needs a real clean up *)
 let compile_proofs = ref true
 
 let _ = Pp.print_db_enabled := true
@@ -99,6 +100,8 @@ type obj =
   | TyOp of name * _ty list
   | Thm of name * term * prooft option
 
+let name_dedukti (md,id) = Term.mk_Const dloc (mk_name md id)
+
 let name_eq (md,id) (md',id') = mident_eq md md' && ident_eq id id'
 
 let alpha_eq ctx id id' =
@@ -165,7 +168,7 @@ let print_name out (md,id) =
   Format.fprintf out "%a.%a" Pp.print_ident md Pp.print_ident id
 
 let dloc = dloc
-let hol = mk_mident "hol"
+let hol = mk_mident "sttfa"
 
 let const_of_name (md,id) = Term.mk_Const dloc (mk_name md id)
 
@@ -184,7 +187,7 @@ let hol_arrow = mk_ident "arrow"
 let hol_forall = mk_ident "forall"
 let hol_leibniz = mk_ident "leibniz"
 let hol_impl = mk_ident "impl"
-let hol_prop = mk_ident "prop"
+let hol_prop = mk_ident "bool"
 let hol_eps = mk_ident "eps"
 let hol_forall_kind_type = mk_ident "forallK"
 let hol_forall_kind_prop = mk_ident "forallP"
@@ -192,6 +195,58 @@ let hol_forall_kind_prop = mk_ident "forallP"
 let logic_module = mk_mident "logic"
 
 let (===) = ident_eq
+
+let rec hol__type_dedukti ty =
+  match ty with
+  | VarTy id ->
+    (* painful to get the correct index, so this is a hack cause of Pp.subst function *)
+    Term.mk_DB dloc id 1000
+  | Arrow(tyl,tyr) -> Term.mk_App (name_dedukti (hol,(mk_ident "arrow")))
+                        (hol__type_dedukti tyl) [(hol__type_dedukti tyr)]
+  | OpType(name,tys) ->
+    List.fold_left (fun term arg -> Term.mk_App term (hol__type_dedukti arg) [])
+    (name_dedukti name) tys
+  | Bool -> (name_dedukti (hol,(mk_ident "prop")))
+
+let rec hol_type_dedukti ty =
+  match ty with
+  | ForallK(var,ty) ->
+    Term.mk_App (name_dedukti (hol,(mk_ident "forall_kind_type")))
+      (Term.mk_Lam dloc var (Some (name_dedukti (hol,(mk_ident "type"))))
+         (hol_type_dedukti ty)) []
+  | Type(ty) -> hol__type_dedukti ty
+
+let rec print_hol__type out ty = Pp.print_term out (hol__type_dedukti ty)
+
+let rec print_hol_type out ty = Pp.print_term out (hol_type_dedukti ty)
+
+let rec hol__term_dedukti te =
+  match te with
+  | Forall(id,_ty,_te) ->
+    let ty' = (hol__type_dedukti _ty) in
+    Term.mk_App (name_dedukti (hol, (mk_ident "forall")))
+       ty' [(Term.mk_Lam dloc id
+              (Some (Term.mk_App (name_dedukti (hol, (mk_ident "eta"))) ty' []))
+              (hol__term_dedukti _te))]
+  | Impl(_tel,_ter) ->
+    Term.mk_App (name_dedukti (hol, (mk_ident "impl")))
+      (hol__term_dedukti _tel) [(hol__term_dedukti _ter)]
+  | VarTerm(ident,n,_) -> Term.mk_DB dloc ident n
+  | Const(name,_,_) -> name_dedukti name
+  | Lam(id, _ty, _term) -> Term.mk_Lam dloc id (Some (hol__type_dedukti _ty)) (hol__term_dedukti _term)
+  | App(f,a) ->
+    Term.mk_App (hol__term_dedukti f) (hol__term_dedukti a) []
+
+let rec hol_term_dedukti te =
+  match te with
+  | ForallT(var,te) ->
+    Term.mk_App (name_dedukti (hol, (mk_ident "forall_kind_prop")))
+      (Term.mk_Lam dloc var (Some (name_dedukti (hol, (mk_ident "type"))))
+         (hol_term_dedukti te)) []
+  | Term te -> hol__term_dedukti te
+
+let rec print_hol__term out te = Pp.print_term out (hol__term_dedukti te)
+let rec print_hol_term out te = Pp.print_term out (hol_term_dedukti te)
 
 let is_hol_const c t =
   match t with
@@ -409,7 +464,8 @@ and compile_type (ty_ctx:ty_ctx) (ty:Term.term) : ty =
   | Term.App(c, Term.Lam(_, var, _, ty), []) when is_hol_const hol_forall_kind_type c ->
     let ty' = compile_type (var::ty_ctx) ty in
     ForallK(var, ty')
-  | _ -> Type (compile__type ty_ctx ty)
+  | Term.App(cst, ty, []) when is_hol_const hol_p cst ->  Type (compile__type ty_ctx ty)
+  | _ -> assert false
 
 and compile__type (ty_ctx:ty_ctx) (ty:Term.term) : _ty =
   match ty with
@@ -430,7 +486,8 @@ and compile__type (ty_ctx:ty_ctx) (ty:Term.term) : _ty =
 
 let compile_eta__type (ty_ctx:ty_ctx) (ty:Term.term) : _ty =
   match ty with
-  | Term.App(cst, a, []) when is_hol_const hol_etap cst -> compile__type ty_ctx a
+  | Term.App(cst, Term.App(cst', a,[]), []) when is_hol_const hol_etap cst
+    && is_hol_const hol_p cst' -> compile__type ty_ctx a
   | _ -> assert false
 
 let compile_eta_type (ty_ctx:ty_ctx) (ty:Term.term) : ty =
@@ -569,11 +626,13 @@ let rec snf_beta _term =
     end
   | _ -> _term
 
+let one_step cst = Env.unsafe_one_step cst
+
 let rec unfold_left t =
   match t with
   | Const((md,id),ty, ty_subst) ->
     let cst = Term.mk_Const dloc (mk_name md id) in
-    let te = Env.unsafe_one_step cst in
+    let te = one_step cst in
     let te'= compile_term [] [] te in
     let _te = poly_subst_te ty_subst te' in
     _te
@@ -606,11 +665,14 @@ module Trace : Trace = struct
     | Some(ctx, rw) -> Some(i::ctx, rw)
 
   let rec _compare_naive ctx left right : (ctx * rw dir option) option =
+    (*
+    Format.eprintf "left: %a@." print_hol__term left;
+    Format.eprintf "right: %a@." print_hol__term right; *)
     (* assume barendregt convention *)
     let is_unfoldable (md,id) =
       let name = mk_name md id in
       let cst = Term.mk_Const dloc name in
-      let t =  Env.unsafe_one_step cst in
+      let t =  one_step cst in
       if Term.term_eq cst t then false else true
     in
     (*
@@ -730,7 +792,7 @@ module Trace : Trace = struct
       | Fold(Delta(name,_ty,subst)) ->
         (* Format.eprintf "unfold delta: %a@." print_name name; *)
         let cst = const_of_name name in
-        let te = Env.unsafe_one_step cst in
+        let te = one_step cst in
         let te'= compile_term [] [] te in
         let _te = poly_subst_te subst te' in
         let _t' = _replace _t ctx _te in
@@ -754,7 +816,7 @@ module Trace : Trace = struct
       | Unfold(Delta(name,_ty,subst)) ->
         (* Format.eprintf "fold delta: %a@." print_name name; *)
         let cst = const_of_name name in
-        let te = Env.unsafe_one_step cst in
+        let te = one_step cst in
         let te'= compile_term [] [] te in
         let _te = poly_subst_te subst te' in
         let _term = _replace _pt._term ctx _te in
@@ -820,9 +882,9 @@ module Trace : Trace = struct
     let to_trace ctx rw =
       match rw with
       | Some(rw) -> (ctx, rw)
-      | None -> assert false (*
+      | None -> Format.printf "%b@." (t = pt.term);
         Errors.fail dloc "Contextual error: The terms %a and %a seems not to be convertible. They differ at position %a"
-          print_hol_term t print_hol_term pt.term print_ctx ctx *)
+          print_hol_term t print_hol_term pt.term print_ctx ctx
     in
     match compare [] t pt.term with
     | None -> {pt with term = alpha_rename_type t pt.term}
@@ -831,7 +893,7 @@ module Trace : Trace = struct
       match rw with
       | Fold(Delta(name,_ty,subst)) ->
         let cst = const_of_name name in
-        let te = Env.unsafe_one_step cst in
+        let te = one_step cst in
         let te'= compile_term [] [] te in
         let _te = poly_subst_te subst te' in
         let t' = replace t ctx _te in
@@ -851,7 +913,7 @@ module Trace : Trace = struct
         {term;proof}
       | Unfold(Delta(name,_ty,subst)) ->
         let cst = const_of_name name in
-        let te = Env.unsafe_one_step cst in
+        let te = one_step cst in
         let te'= compile_term [] [] te in
         let _te = poly_subst_te subst te' in
         let term = replace pt.term ctx _te in
@@ -1339,7 +1401,7 @@ and compile_app (ty_ctx:ty_ctx) (te_ctx:term_ctx) (pf_ctx:proof_ctx) (prooft:_pr
       {_term=_telr;_proof=ImplE(prooft, prooft')}
     | App(Const(name, _ty, subst), _tes) ->
       let cst = const_of_name name in
-      let te = Env.unsafe_one_step cst in
+      let te = one_step cst in
       let te'= compile_term [] [] te in
       let _te = poly_subst_te subst te' in
       let _te' = snf_beta (App(_te, _tes)) in
@@ -1361,7 +1423,7 @@ and unfold_step t k =
   match t with
   | Const(name, _ty, subst) ->
     let cst = const_of_name name in
-    let te = Env.unsafe_one_step cst in
+    let te = one_step cst in
     let te'= compile_term [] [] te in
     let _te = poly_subst_te subst te' in
     k _te
@@ -1376,32 +1438,11 @@ let rec compile_proof (ty_ctx:ty_ctx) (te_ctx:term_ctx) (proof:Term.term) : proo
   | Term.Lam(_,x, Some ty, proof') when is_hol_const hol_type ty ->
     let prooft' = compile_proof (x::ty_ctx) te_ctx proof' in
     {term=ForallT(x,prooft'.term); proof=ForallP(x, prooft')}
-    (*
-  | Term.App(Term.Const(_,md,id) as cst, ctx, [proof]) when is_delta_rw cst ->
-    let id,_ = get_infos_of_delta_rw md id in
-    let arg = Term.mk_Const dloc md id in
-    let term =
-      match Env.reduction ~red:Tracer.only_beta Reduction.OneStep (Term.mk_App ctx arg []) with
-      | OK te -> te
-      | Err err -> Errors.fail_env_error err
-    in
-    let term' = compile_term ty_ctx te_ctx term in
-    let prooft' = compile_proof ty_ctx te_ctx proof in
-    begin
-      match ctx with
-      | Term.Lam(_, var, Some ty, te) ->
-        let ty' = compile_type ty_ctx ty in
-        {term=term';proof=DeltaF((md,id),(id,compile_term ty_ctx ((var,ty')::te_ctx) te), prooft')}
-      | _ -> assert false
-    end
-*)
   | _ ->
     let _prooft' = compile__proof ty_ctx te_ctx [] proof in
     {term=Term(_prooft'._term); proof=Proof(_prooft')}
 
-let compile_declaration (lc:loc) (id:ident) (te:Term.term) : (obj, compile_decl_err) error =
-  let md = Env.get_name () in
-  let name = mk_name md id in
+let compile_declaration (lc:loc) (name:Basic.name) (te:Term.term) : (obj, compile_decl_err) error =
   try
     match te with
     | Term.App(cst,a,[]) when is_hol_const hol_etap cst ->
@@ -1410,12 +1451,12 @@ let compile_declaration (lc:loc) (id:ident) (te:Term.term) : (obj, compile_decl_
       OK(Thm(mk_hol_name name, compile_term [] [] a, None))
     | Term.Const(_, name) when is_hol_const hol_type te ->
       OK(TyOp(mk_hol_name name, []))
-    | _ -> Err(DeclarationError(lc,id,te))
+    | _ -> Err(DeclarationError(lc,id name,te))
   with
   | CompileTermError(err) ->
-    Err(DeclarationTermError(err,(lc,id,te)))
+    Err(DeclarationTermError(err,(lc,id name,te)))
   | CompileTypeError(err) ->
-    Err(DeclarationTypeError(err,(lc,id,te)))
+    Err(DeclarationTypeError(err,(lc,id name,te)))
 
 let fail_compile_declaration (err:compile_decl_err) : 'a =
   match err with
@@ -1452,11 +1493,9 @@ let rec has_beta te =
   | ForallT(_,te) -> has_beta te
   | Term te -> has_beta' te
 
-let compile_definition (lc:loc) (id:ident) (ty:Term.term) (te:Term.term)
+let compile_definition (lc:loc) (name:Basic.name) (ty:Term.term) (te:Term.term)
   : (obj, compile_defn_err) error =
-  Format.eprintf "Compilation of definition %a@." Pp.print_ident id;
-  let md = Env.get_name () in
-  let name = mk_name md id in
+  Format.eprintf "Compilation of definition %a@." Pp.print_ident (id name);
   try
     match ty with
     | Term.App(cst,a,[]) when is_hol_const hol_etap cst ->
@@ -1468,18 +1507,14 @@ let compile_definition (lc:loc) (id:ident) (ty:Term.term) (te:Term.term)
       let proof' = Trace.annotate thm proof in
       let _,proof'' = alpha_rename_prooft [] proof' in
       OK(Thm(mk_hol_name name, thm, Some proof''))
-    | _ -> Err(DefinitionError((lc,id,te),ty))
+    | _ -> Err(DefinitionError((lc,id name,te),ty))
   with
   | CompileTermError(err) ->
-    Err(DefinitionTermError(err,(lc,id,te),ty))
+    Err(DefinitionTermError(err,(lc,id name,te),ty))
   | CompileTypeError(err) ->
-    Err(DefinitionTypeError(err,(lc,id,te),ty))
+    Err(DefinitionTypeError(err,(lc,id name,te),ty))
   | CompileProofError(err) ->
-    Err(DefinitionProofError(err,(lc,id,te),ty))
-(*
-           match compile_declaration lc id ty with
-  | OK(obj) -> OK(obj)
-  | Err err -> fail_compile_declaration err *)
+    Err(DefinitionProofError(err,(lc,id name,te),ty))
 
 let fail_compile_definition (err:compile_defn_err) : 'a =
   match err with
@@ -1528,7 +1563,7 @@ let rec compile_hol__type (ty_ctx:ty_ctx) (_ty:_ty) =
     let tyop' = OT.mk_tyOp (compile_hol_name name) in
     let tys' = List.map (compile_hol__type ty_ctx) tys in
     OT.ty_of_tyOp tyop' tys'
-  | Bool -> OT.mk_bool_type
+  | Bool -> OT.mk_bool_type ()
 
 let rec compile_hol_type (ty_ctx:ty_ctx) (ty:ty) =
   match ty with
@@ -1618,7 +1653,7 @@ type ctx_proof =
 
 let hol_const_of_name name _ty ty_subst =
   let cst = const_of_name name in
-  let te = Env.unsafe_one_step cst in
+  let te = one_step cst in
   let te' = compile_term [] [] te in
   poly_subst_te ty_subst te'
 
@@ -1864,30 +1899,24 @@ let compile_hol_obj (obj:obj) =
   | TyOp(name,tys) -> compile_hol_TyOp name tys
   | Thm(name,term, proof_op) -> compile_hol_thm name term proof_op
 
-let export_entry mident entry =
-  match entry with
-  | Utils.Declaration(id,te) ->
-    begin
-      match Env.declare dloc id Signature.Static te with
-      | OK () ->
-        begin
-          match compile_declaration dloc id te with
-          | OK(obj) -> compile_hol_obj obj
-          | Err(err) -> fail_compile_declaration err
-        end
-      | Err er -> Errors.fail_env_error er
-    end
-  | Utils.Definition(id,ty,te) ->
-    begin
-      match Env.define dloc id te (Some ty) with
-      | OK () ->
-        begin
-          match compile_definition dloc id ty te with
-          | OK(obj) -> compile_hol_obj obj
-          | Err(err) -> fail_compile_definition err
-        end
-      | Err er -> Errors.fail_env_error er
-    end
-  | Utils.Opaque(id,ty,te) -> failwith "todo opaque"
+let init fmt =
+  OT.set_fmt fmt;
+  OT.version ()
 
-let flush fmt = failwith "todo"
+let export_entry entry =
+  match entry with
+  | Utils.Declaration(name,te) ->
+    begin
+      match compile_declaration dloc name te with
+      | OK(obj) -> compile_hol_obj obj
+      | Err(err) -> fail_compile_declaration err
+    end
+  | Utils.Definition(name,ty,te) ->
+    begin
+      match compile_definition dloc name ty te with
+      | OK(obj) -> compile_hol_obj obj
+      | Err(err) -> fail_compile_definition err
+    end
+  | Utils.Opaque(name,ty,te) -> failwith "todo opaque"
+
+let flush _ = ()

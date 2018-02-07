@@ -26,19 +26,22 @@ module T = struct
     Env.init i
 
   let mk_declaration _ i st ty =
+    let name = mk_name (Env.get_name ()) i in
     match st with
     | Signature.Definable -> failwith "definable declarations are not supported (maybe it should be static)"
-    | Signature.Static -> entries := Utils.Declaration(i,ty)::!entries
+    | Signature.Static -> entries := Utils.Declaration(name,ty)::!entries
 
   let mk_definition _ i ty t =
+    let name = mk_name (Env.get_name ()) i in
     match ty with
     | None -> failwith "definitions should have a type"
-    | Some ty -> entries := Utils.Definition(i,ty,t)::!entries
+    | Some ty -> entries := Utils.Definition(name,ty,t)::!entries
 
   let mk_opaque _ i ty t =
+    let name = mk_name (Env.get_name ()) i in
     match ty with
     | None -> failwith "Opaque definitions should have a type"
-    | Some ty -> entries := Utils.Opaque(i,ty,t)::!entries
+    | Some ty -> entries := Utils.Opaque(name,ty,t)::!entries
 
   let mk_rules l = failwith "Rules are not part of theory"
 
@@ -82,8 +85,9 @@ let  _ =
     then process_chan stdin
     else List.iter process_file (List.rev !files);
   let module E  = ((val !system):Export.E) in
-  List.iter (E.export_entry (Basic.mk_mident "final")) !entries;
+  let fmt =
   if !output_file = "" then
-    E.flush Format.std_formatter
-  else
-    E.flush (Format.formatter_of_out_channel (open_out !output_file))
+    Format.std_formatter else (Format.formatter_of_out_channel (open_out !output_file)) in
+  E.init fmt;
+  List.iter E.export_entry (List.rev !entries);
+  E.flush ()

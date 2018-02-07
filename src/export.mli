@@ -2,9 +2,12 @@ open Basic
 
 module type E =
 sig
-  val export_entry : mident -> Utils.entry -> unit
 
-  val flush : Format.formatter -> unit
+  val init : Format.formatter -> unit
+
+  val export_entry : Utils.entry -> unit
+
+  val flush : unit -> unit
 end
 
 module Coq:E

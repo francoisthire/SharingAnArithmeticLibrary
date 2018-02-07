@@ -165,13 +165,13 @@ let add_definition defn =
 
 type system = [`Coq | `Matita]
 
-let export_entry md entry =
+let export_entry entry =
   match entry with
-  | Utils.Declaration(i,ty) ->
-    add_declaration(compile_declaration (Basic.mk_name md i) ty)
-  | Utils.Definition(i,ty,te) ->
-    add_definition(compile_definition (Basic.mk_name md i) ty te)
-  | Utils.Opaque(i,ty,te) -> failwith "todo"
+  | Utils.Declaration(name,ty) ->
+    add_declaration(compile_declaration name ty)
+  | Utils.Definition(name,ty,te) ->
+    add_definition(compile_definition name ty te)
+  | Utils.Opaque(name,ty,te) -> failwith "todo"
 
 module type Printer =
 sig
@@ -379,8 +379,12 @@ let set_printer s : unit =
 let print_ast out ast =
   let (module P) = !printer in
   P.print_prelude out ();
-  List.iter (print_obj !printer out ast.name) ast.obj
+  List.iter (print_obj !printer out ast.name) (List.rev ast.obj)
 
-let flush system fmt =
+let fmt = ref Format.std_formatter
+
+let init f = fmt := f
+
+let flush system =
   set_printer system;
-  print_ast fmt !ast
+  print_ast !fmt !ast

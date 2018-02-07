@@ -27,11 +27,11 @@ module type OpenSTT = sig
 
   val mk_arrow_type : ty obj -> ty obj -> ty obj
 
-  val mk_bool_type : ty obj
+  val mk_bool_type : unit -> ty obj
 
   val mk_equal_type : ty obj -> ty obj
 
-  val mk_impl_type : ty obj
+  val mk_impl_type : unit -> ty obj
 
   val mk_forall_type : ty obj -> ty obj
 
@@ -98,6 +98,10 @@ module type OpenSTT = sig
   val debug : 'a obj -> unit
 
   val comment : ('a, Format.formatter, unit) format -> 'a
+
+  val version : unit -> unit
+
+  val set_fmt : Format.formatter -> unit
 end
 
 module Basic = struct
@@ -188,7 +192,9 @@ module Basic = struct
       | ProveHyp(op) -> print_op out op; Format.fprintf out "proveHyp@."
       | Thm(op) -> print_op out op; Format.fprintf out "thm@."
 
-  let version = print_op Format.std_formatter (Version(Int(6,Empty)))
+  let fmt = ref Format.std_formatter
+
+  let set_fmt f = fmt := f
 
   type 'a push =
     {
@@ -226,7 +232,7 @@ module Basic = struct
     else
       let id = !counter in incr counter;
       let to_def obj = Pop(Def(Int(id,(obj.push Empty)))) in
-      print_op Format.std_formatter (to_def t);
+      print_op !fmt (to_def t);
       Hashtbl.add memory (Hash(t.push Empty)) id;
       {instr=t;id}
 
@@ -236,15 +242,15 @@ module Basic = struct
     let full_name = (mk_namespace namespace)^name in
     save { push = fun k -> String(full_name,k)}
 
-  let arrow_name = mk_name [] "->"
+  let arrow_name () = mk_name [] "->"
 
-  let bool_name = mk_name [] "bool"
+  let bool_name () = mk_name [] "bool"
 
-  let equal_name = mk_name [] "="
+  let equal_name () = mk_name [] "="
 
-  let impl_name = mk_name [] "==>"
+  let impl_name () = mk_name [] "==>"
 
-  let forall_name = mk_name [] "!"
+  let forall_name () = mk_name [] "!"
 
   (* FIXME: can bypass this hack by changin hashtbl so that the keys are of types name * 'a op *)
   let string_of_name name =
@@ -252,20 +258,15 @@ module Basic = struct
     | String(s,Empty) -> s
     | _ -> assert false
 
-  let _ =
-    Hashtbl.add const_defined (string_of_name equal_name)
-      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load equal_name k)})
-
-
   let mk_var name ty : var obj =
     save {push = fun k -> Var(load ty (load name k))}
 
   let mk_tyOp name : tyOp obj =
     save {push = fun k -> TypeOp(load name k)}
 
-  let arrow_tyOp = mk_tyOp arrow_name
+  let arrow_tyOp () = mk_tyOp (arrow_name ())
 
-  let bool_tyOp = mk_tyOp bool_name
+  let bool_tyOp () = mk_tyOp (bool_name ())
 
   let mk_varType name : ty obj =
     save {push = fun k -> VarType(load name k)}
@@ -285,19 +286,19 @@ module Basic = struct
     save {push = fun k -> OpType(load list (load tyOp k))}
 
   let mk_arrow_type tyl tyr : ty obj =
-    ty_of_tyOp arrow_tyOp [tyl;tyr]
+    ty_of_tyOp (arrow_tyOp ()) [tyl;tyr]
 
-  let mk_bool_type : ty obj =
-    ty_of_tyOp bool_tyOp []
+  let mk_bool_type () : ty obj =
+    ty_of_tyOp (bool_tyOp ()) []
 
   let mk_equal_type ty : ty obj =
-    mk_arrow_type ty (mk_arrow_type ty mk_bool_type)
+    mk_arrow_type ty (mk_arrow_type ty (mk_bool_type ()))
 
-  let mk_impl_type =
-    mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type)
+  let mk_impl_type () =
+    mk_arrow_type (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type()))
 
   let mk_forall_type ty =
-    mk_arrow_type (mk_arrow_type ty mk_bool_type) mk_bool_type
+    mk_arrow_type (mk_arrow_type ty (mk_bool_type ())) (mk_bool_type ())
 
   let mk_app_term f t : term obj =
     save {push = fun k -> AppTerm(load t (load f k))}
@@ -322,7 +323,7 @@ module Basic = struct
 
   let mk_equal_term left right ty =
     let ty = mk_equal_type ty in
-    let cst = term_of_const (const_of_name equal_name) ty in
+    let cst = term_of_const (const_of_name (equal_name ())) ty in
     mk_app_term (mk_app_term cst left) right
 
   let mk_const name (term:term obj) : unit =
@@ -337,7 +338,7 @@ module Basic = struct
     let push (k:'a op) = DefineConst(load term (load name k)) in
     let def_thm k = Pop(Def(Int(thm,k))) in
     let def_cst k = Pop(Def(Int(cst,k))) in
-    print_op Format.std_formatter (def_cst @@ def_thm @@ push Empty);
+    print_op !fmt (def_cst @@ def_thm @@ push Empty);
     let push_thm = {push=fun k -> Ref(Int(thm,k))} in
     let push_cst = {push=fun k -> Ref(Int(cst,k))} in
     let obj_thm = {instr=push_thm; id = thm} in
@@ -345,10 +346,10 @@ module Basic = struct
     Hashtbl.add const_defined str (obj_thm,obj_cst)
 
   let debug obj =
-    print_op Format.std_formatter (Pop(Pragma(String("debug",load obj Empty))))
+    print_op !fmt (Pop(Pragma(String("debug",load obj Empty))))
 
-  let comment fmt =
-    Format.fprintf Format.std_formatter fmt
+  let comment f =
+    Format.fprintf !fmt f
 
   let mk_hyp ts : hyp obj = mk_list ts
 
@@ -402,10 +403,10 @@ module Basic = struct
   let mk_thm name term hyp thm =
     let str = string_of_name name in
     Hashtbl.add lemmas_defined str thm;
-    print_op Format.std_formatter (Thm(load term (load hyp (load thm Empty))))
+    print_op !fmt (Thm(load term (load hyp (load thm Empty))))
 
   let mk_remove x =
-    print_op Format.std_formatter (Pop(Remove(Int(x,Empty))))
+    print_op !fmt (Pop(Remove(Int(x,Empty))))
 
   let thm_of_lemma name =
     let str = string_of_name name in
@@ -418,53 +419,57 @@ end
 module OpenTheory = struct
   include Basic
 
-  let true_name = mk_name [] "T"
+  let true_name () = mk_name [] "T"
 
-  let and_name = mk_name [] "/\\\\"
+  let and_name () = mk_name [] "/\\\\"
 
-  let _ =
-    Hashtbl.add const_defined (string_of_name true_name)
-      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load true_name k)});
-    Hashtbl.add const_defined (string_of_name and_name)
-      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load and_name k)});
-    Hashtbl.add const_defined (string_of_name impl_name)
-      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load impl_name k)});
-    Hashtbl.add const_defined (string_of_name forall_name)
-      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load forall_name k)})
+  let version () = print_op !fmt (Version(Int(6,Empty)));
+    Hashtbl.add const_defined (string_of_name (equal_name ()))
+      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load (equal_name ()) k)});
+    Hashtbl.add const_defined (string_of_name (true_name ()))
+      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load (true_name ()) k)});
+    Hashtbl.add const_defined (string_of_name (and_name ()))
+      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load (and_name ()) k)});
+    Hashtbl.add const_defined (string_of_name (impl_name()))
+      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load (impl_name ()) k)});
+    Hashtbl.add const_defined (string_of_name (forall_name()))
+      (save { push = fun k -> Obj.magic@@ String("Error",k)} , save {push=fun k -> Const(load (forall_name ()) k)})
 
-  let mk_true_type = mk_bool_type
+  let mk_true_type () = mk_bool_type ()
 
-  let mk_and_type = mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type)
+  let mk_and_type () = mk_arrow_type
+      (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type()))
 
-  let mk_true_term = term_of_const (const_of_name true_name) mk_true_type
+  let mk_true_term () = term_of_const (const_of_name (true_name ())) (mk_true_type ())
 
   let mk_and_term left right =
-    let cst = term_of_const (const_of_name and_name) mk_and_type in
+    let cst = term_of_const (const_of_name (and_name ())) (mk_and_type ()) in
     mk_app_term (mk_app_term cst left) right
 
   let mk_impl_term left right =
-    let cst = term_of_const (const_of_name impl_name) mk_impl_type in
+    let cst = term_of_const (const_of_name (impl_name ())) (mk_impl_type ()) in
     mk_app_term (mk_app_term cst left) right
 
   let mk_forall_term f ty =
-    let cst = term_of_const (const_of_name forall_name) (mk_forall_type ty) in
+    let cst = term_of_const (const_of_name (forall_name ())) (mk_forall_type ty) in
     mk_app_term cst f
 
-  let mk_axiom_true = mk_axiom (mk_hyp []) mk_true_term
+  let mk_axiom_true () = mk_axiom (mk_hyp []) (mk_true_term ())
 
-  let mk_axiom_and_ =
-    let binop_type = mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type) in
-    let vx = mk_var (mk_name [] "x") mk_bool_type in
-    let vy = mk_var (mk_name [] "y") mk_bool_type in
+  let mk_axiom_and_ () =
+    let binop_type =
+      mk_arrow_type (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type ())) in
+    let vx = mk_var (mk_name [] "x") (mk_bool_type ()) in
+    let vy = mk_var (mk_name [] "y") (mk_bool_type ()) in
     let x = mk_var_term vx in
     let y = mk_var_term vy in
     let tand = mk_abs_term vx (mk_abs_term vy (mk_and_term x y)) in
     let vf = mk_var (mk_name [] "f") binop_type in
     let f = mk_var_term vf in
     let rl = mk_abs_term vf (mk_app_term (mk_app_term f x) y) in
-    let rr = mk_abs_term vf (mk_app_term (mk_app_term f mk_true_term) mk_true_term) in
+    let rr = mk_abs_term vf (mk_app_term (mk_app_term f (mk_true_term ())) (mk_true_term ())) in
     let rhs = mk_abs_term vx (mk_abs_term vy (mk_equal_term rl rr
-                                                (mk_arrow_type binop_type mk_bool_type))) in
+                                                (mk_arrow_type binop_type (mk_bool_type ())))) in
     let term = mk_equal_term tand rhs binop_type in
     mk_axiom (mk_hyp []) term
 
@@ -477,81 +482,83 @@ module OpenTheory = struct
     mk_trans trans right
 
   let mk_axiom_and left right =
-    let binop_type = mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type) in
-    let vx = mk_var (mk_name [] "freshx") mk_bool_type in
-    let vy = mk_var (mk_name [] "freshy") mk_bool_type in
+    let binop_type =
+      mk_arrow_type (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type ())) in
+    let vx = mk_var (mk_name [] "freshx") (mk_bool_type ()) in
+    let vy = mk_var (mk_name [] "freshy") (mk_bool_type ()) in
     let x = mk_var_term vx in
     let y = mk_var_term vy in
     let t1 = (mk_abs_term vy (mk_and_term x y)) in
     let fv = mk_var (mk_name [] "freshf") (binop_type) in
     let ft = mk_var_term fv in
     let rl = mk_abs_term fv (mk_app_term (mk_app_term ft x) y) in
-    let rr = mk_abs_term fv (mk_app_term (mk_app_term ft mk_true_term) mk_true_term) in
-    let t2 = mk_abs_term vy (mk_equal_term rl rr (mk_arrow_type binop_type mk_bool_type)) in
+    let rr = mk_abs_term fv (mk_app_term (mk_app_term ft (mk_true_term ())) (mk_true_term ())) in
+    let t2 = mk_abs_term vy (mk_equal_term rl rr (mk_arrow_type binop_type (mk_bool_type ()))) in
     let refl = mk_refl left in
     let tl = mk_app_term (mk_abs_term vx t1) left in
     let tr = mk_app_term (mk_abs_term vx t2) left in
-    let beta1 = beta_equal (mk_appThm mk_axiom_and_ refl) tl tr in
+    let beta1 = beta_equal (mk_appThm (mk_axiom_and_ ()) refl) tl tr in
     let rl = mk_abs_term fv (mk_app_term (mk_app_term ft left) y) in
-    let t2 = mk_equal_term rl rr (mk_arrow_type binop_type mk_bool_type) in
+    let t2 = mk_equal_term rl rr (mk_arrow_type binop_type (mk_bool_type ())) in
     let refl = mk_refl right in
     let tl = mk_app_term (mk_abs_term vy (mk_and_term left y)) right in
     let tr = mk_app_term (mk_abs_term vy t2) right in
     beta_equal (mk_appThm beta1 refl) tl tr
 
-  let mk_axiom_impl_ =
-    let binop_type = mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type) in
-    let vx = mk_var (mk_name [] "x") mk_bool_type in
-    let vy = mk_var (mk_name [] "y") mk_bool_type in
+  let mk_axiom_impl_ () =
+    let binop_type =
+      mk_arrow_type (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type ())) in
+    let vx = mk_var (mk_name [] "x") (mk_bool_type ()) in
+    let vy = mk_var (mk_name [] "y") (mk_bool_type ()) in
     let x = mk_var_term vx in
     let y = mk_var_term vy in
     let implt = mk_abs_term vx (mk_abs_term vy (mk_impl_term x y)) in
-    let r = mk_equal_term (mk_and_term x y) x mk_bool_type in
+    let r = mk_equal_term (mk_and_term x y) x (mk_bool_type ()) in
     let term = mk_equal_term implt (mk_abs_term vx (mk_abs_term vy r)) binop_type in
     mk_axiom (mk_hyp []) term
 
   let mk_axiom_impl left right =
-    let vx = mk_var (mk_name [] "freshx") mk_bool_type in
-    let vy = mk_var (mk_name [] "freshy") mk_bool_type in
+    let vx = mk_var (mk_name [] "freshx") (mk_bool_type ()) in
+    let vy = mk_var (mk_name [] "freshy") (mk_bool_type ()) in
     let x = mk_var_term vx in
     let y = mk_var_term vy in
     let tl = mk_app_term (mk_abs_term vx (mk_abs_term vy (mk_impl_term x y))) left in
     let tr = mk_app_term (mk_abs_term vx (mk_abs_term vy
-                                            (mk_equal_term (mk_and_term x y) x mk_bool_type))) left in
+                                            (mk_equal_term (mk_and_term x y) x (mk_bool_type ())))) left in
     let refl = mk_refl left in
-    let beta1 = beta_equal (mk_appThm mk_axiom_impl_ refl) tl tr in
+    let beta1 = beta_equal (mk_appThm (mk_axiom_impl_ ()) refl) tl tr in
     let tl = mk_app_term (mk_abs_term vy (mk_impl_term left y)) right in
     let tr = mk_app_term
-        (mk_abs_term vy (mk_equal_term (mk_and_term left y) left mk_bool_type)) right in
+        (mk_abs_term vy (mk_equal_term (mk_and_term left y) left (mk_bool_type ()))) right in
     let refl = mk_refl right in
     let thm = beta_equal (mk_appThm beta1 refl) tl tr in
     thm
 
 
 
-  let mk_axiom_forall_ =
+  let mk_axiom_forall_ () =
     let ty = mk_varType (mk_name [] "A") in
-    let vx = mk_var (mk_name [] "x") (mk_arrow_type ty mk_bool_type) in
+    let vx = mk_var (mk_name [] "x") (mk_arrow_type ty (mk_bool_type ())) in
     let x = mk_var_term vx in
     let tforall = mk_abs_term vx (mk_forall_term x ty) in
-    let r = mk_abs_term (mk_var (mk_name [] "v") ty) mk_true_term in
-    let instr = mk_equal_term tforall (mk_abs_term vx (mk_equal_term x r (mk_arrow_type ty mk_bool_type))) (mk_arrow_type (mk_arrow_type ty mk_bool_type) mk_bool_type) in
+    let r = mk_abs_term (mk_var (mk_name [] "v") ty) (mk_true_term ()) in
+    let instr = mk_equal_term tforall (mk_abs_term vx (mk_equal_term x r (mk_arrow_type ty (mk_bool_type ())))) (mk_arrow_type (mk_arrow_type ty (mk_bool_type ())) (mk_bool_type ())) in
     mk_axiom (mk_hyp []) instr
 
   let mk_axiom_forall p ty =
     let env_type = [(mk_name [] "A"),ty] in
     let env_var = [] in
-    let var = mk_var (mk_name [] "x") (mk_arrow_type ty mk_bool_type) in
+    let var = mk_var (mk_name [] "x") (mk_arrow_type ty (mk_bool_type ())) in
     let tl = mk_app_term (mk_abs_term var (mk_forall_term (mk_var_term var) ty)) p in
-    let tr = mk_app_term (mk_abs_term var (mk_equal_term (mk_var_term var) (mk_abs_term (mk_var (mk_name [] "x") ty) mk_true_term) (mk_arrow_type ty mk_bool_type))) p in
+    let tr = mk_app_term (mk_abs_term var (mk_equal_term (mk_var_term var) (mk_abs_term (mk_var (mk_name [] "x") ty) (mk_true_term ())) (mk_arrow_type ty (mk_bool_type ())))) p in
     let refl = mk_refl p in
-    beta_equal (mk_appThm (mk_subst mk_axiom_forall_ env_type env_var) refl) tl tr
+    beta_equal (mk_appThm (mk_subst (mk_axiom_forall_ ()) env_type env_var) refl) tl tr
 
 
   let mk_rule_intro_forall name ty te thm =
     let var = mk_var name ty in
     let true_thm = mk_axiom_true in
-    let absThm = mk_absThm var (mk_deductAntiSym thm true_thm) in
+    let absThm = mk_absThm var (mk_deductAntiSym thm (true_thm ())) in
     let lambda = mk_abs_term var te in
     let forall_thm = mk_axiom_forall lambda ty in
     let sym = mk_sym forall_thm in
@@ -563,18 +570,19 @@ module OpenTheory = struct
     let eqMp = mk_eqMp thm tforall in
     let refl = mk_refl t in
     let appThm = mk_appThm eqMp refl in
-    let te = mk_app_term (mk_abs_term (mk_var (mk_name [] "v") ty) mk_true_term) t in
+    let te = mk_app_term (mk_abs_term (mk_var (mk_name [] "v") ty) (mk_true_term ())) t in
     let beta = mk_betaConv te in
     let true_thm = mk_axiom_true in
-    let eqMp = mk_eqMp true_thm (mk_sym (mk_trans appThm beta)) in
+    let eqMp = mk_eqMp (true_thm ()) (mk_sym (mk_trans appThm beta)) in
     let beta = mk_betaConv (mk_app_term lambda t) in
     mk_eqMp eqMp beta
 
 
   let proj thm bool left right =
-    let binop_type = mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type) in
-    let x = mk_var (mk_name [] "freshx") mk_bool_type in
-    let y = mk_var (mk_name [] "freshy") mk_bool_type in
+    let binop_type =
+      mk_arrow_type (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type ())) in
+    let x = mk_var (mk_name [] "freshx") (mk_bool_type ()) in
+    let y = mk_var (mk_name [] "freshy") (mk_bool_type ()) in
     let pleft = mk_abs_term x (mk_abs_term y (mk_var_term x)) in
     let pright = mk_abs_term x (mk_abs_term y (mk_var_term y)) in
     let side = if bool then pright else pleft in
@@ -586,23 +594,23 @@ module OpenTheory = struct
     let vf = mk_var (mk_name [] "f") binop_type in
     let f = mk_var_term vf in
     let tl = mk_app_term (mk_abs_term vf (mk_app_term (mk_app_term f left) right)) side in
-    let tr = mk_app_term (mk_abs_term vf (mk_app_term (mk_app_term f mk_true_term) mk_true_term)) side in
+    let tr = mk_app_term (mk_abs_term vf (mk_app_term (mk_app_term f (mk_true_term ())) (mk_true_term ()))) side in
     let beta1 = beta_equal appThm tl tr in
     let betaConv = mk_betaConv (mk_app_term (mk_abs_term x (mk_abs_term y xory)) left) in
     let refl = mk_refl right in
     let appThm = mk_appThm betaConv refl in
     let sym = mk_sym appThm in
     let trans = mk_trans sym beta1 in
-    let betaConv = mk_betaConv (mk_app_term (mk_abs_term x (mk_abs_term y xory)) mk_true_term) in
-    let refl = mk_refl mk_true_term in
+    let betaConv = mk_betaConv (mk_app_term (mk_abs_term x (mk_abs_term y xory)) (mk_true_term ())) in
+    let refl = mk_refl (mk_true_term ()) in
     let appThm = mk_appThm betaConv refl in
     let trans = mk_trans trans appThm in
     let tl = mk_app_term (mk_abs_term y (if bool then xory else left)) right in
-    let tr = mk_app_term (mk_abs_term y (if bool then xory else mk_true_term)) mk_true_term in
+    let tr = mk_app_term (mk_abs_term y (if bool then xory else (mk_true_term ()))) (mk_true_term ()) in
     let beta = beta_equal trans tl tr in
     let sym = mk_sym beta in
     let true_thm = mk_axiom_true in
-    let thm = mk_eqMp true_thm sym in
+    let thm = mk_eqMp (true_thm ()) sym in
     thm
 
 
@@ -613,15 +621,16 @@ module OpenTheory = struct
     proj thm true left right
 
   let mk_rule_intro_impl thm p q =
-    let binop_type = mk_arrow_type mk_bool_type (mk_arrow_type mk_bool_type mk_bool_type) in
+    let binop_type =
+      mk_arrow_type (mk_bool_type ()) (mk_arrow_type (mk_bool_type ()) (mk_bool_type ())) in
     let assume = mk_assume p in
     let thm_true = mk_axiom_true in
-    let deduct = mk_deductAntiSym assume thm_true in
+    let deduct = mk_deductAntiSym assume (thm_true ()) in
     let vf = mk_var (mk_name [] "freshf") binop_type in
     let f = mk_var_term vf in
     let refl = mk_refl f in
     let appThm = mk_appThm refl deduct in
-    let deduct = mk_deductAntiSym thm thm_true in
+    let deduct = mk_deductAntiSym thm (thm_true ()) in
     let appThm = mk_appThm appThm deduct in
     let absThm = mk_absThm vf appThm in
     let tand = mk_axiom_and p q in
@@ -634,7 +643,6 @@ module OpenTheory = struct
     let sym = mk_sym timpl in
     mk_eqMp deduct sym
 
-
   let mk_rule_elim_impl thmp thmimpl p q =
     let timpl = mk_axiom_impl p q in
     let assume = mk_assume (mk_impl_term p q) in
@@ -646,7 +654,6 @@ module OpenTheory = struct
     let proveHyp = mk_proveHyp proj_right thmp in
     let thm = mk_proveHyp proveHyp thmimpl in
     thm
-
 
   let mk_impl_equal eqp eqq p q p' q' =
     let assume = mk_assume p' in
@@ -665,7 +672,6 @@ module OpenTheory = struct
     let eqMp = mk_eqMp impl_elim sym in
     let intro_impl_right = mk_rule_intro_impl eqMp p q in
     mk_deductAntiSym intro_impl_right intro_impl_left
-
 
   let mk_forall_equal eq name left right ty =
     let lambda_l = mk_abs_term (mk_var name ty) left in
@@ -689,7 +695,6 @@ module OpenTheory = struct
     let assume = mk_assume (mk_equal_term l r ty) in
     let trans = mk_trans sym assume in
     let l'r' = mk_trans trans rr' in
-
     let assume = mk_assume (mk_equal_term l' r' ty) in
     let trans = mk_trans ll' assume in
     let sym = mk_sym rr' in

@@ -4,6 +4,8 @@ type t
 
 type system = [`Coq | `Matita]
 
-val export_entry : mident -> Utils.entry -> unit
+val init : Format.formatter -> unit
 
-val flush : system -> Format.formatter -> unit
+val export_entry : Utils.entry -> unit
+
+val flush : system -> unit

@@ -27,11 +27,11 @@ module type OpenSTT = sig
 
   val mk_arrow_type : ty obj -> ty obj -> ty obj
 
-  val mk_bool_type : ty obj
+  val mk_bool_type : unit -> ty obj
 
   val mk_equal_type : ty obj -> ty obj
 
-  val mk_impl_type : ty obj
+  val mk_impl_type : unit -> ty obj
 
   val mk_forall_type : ty obj -> ty obj
 
@@ -98,6 +98,10 @@ module type OpenSTT = sig
   val debug : 'a obj -> unit
 
   val comment : ('a, Format.formatter, unit) format -> 'a
+
+  val version : unit -> unit
+
+  val set_fmt : Format.formatter -> unit
 end
 
 module OpenTheory : OpenSTT
