@@ -8,7 +8,7 @@ If you want to export this library to your favorite system, please send me a mai
 
 # Compiling the project
 
-To compile the project, you need to install Dedukti first. Then you can compile the project with
+To compile the project, you need to install Dedukti (version 2.5.1) first. Then you can compile the project with
 
 ``` bash
 make main
